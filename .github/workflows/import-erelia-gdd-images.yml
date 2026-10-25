@@ -1,0 +1,42 @@
+name: Import Erelia GDD illustrations (one-time)
+on:
+  push:
+    paths:
+      - '.github/workflows/import-erelia-gdd-images.yml'
+jobs:
+  archive-images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out destination repository
+        uses: actions/checkout@v4
+      - name: Copy and verify the source GDD images
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/EreliaStudio/Erelia.git /tmp/erelia-source
+          git -C /tmp/erelia-source sparse-checkout set docs/gdd/images
+          mkdir -p docs/erelia/images
+          cp -a /tmp/erelia-source/docs/gdd/images/. docs/erelia/images/
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, hashlib
+          source = Path('/tmp/erelia-source/docs/gdd/images')
+          target = Path('docs/erelia/images')
+          source_files = sorted(p.relative_to(source) for p in source.rglob('*') if p.is_file())
+          target_files = sorted(p.relative_to(target) for p in target.rglob('*') if p.is_file())
+          assert len(source_files) == 34, f'Expected 34 illustrations, found {len(source_files)}'
+          assert source_files == target_files, 'Image filenames differ'
+          for rel in source_files:
+              assert hashlib.sha256((source / rel).read_bytes()).digest() == hashlib.sha256((target / rel).read_bytes()).digest(), rel
+          gdd = Path('docs/erelia/gdd.md').read_text()
+          refs = re.findall(r'!\[[^\]]*\]\(images/([^ )]+)', gdd)
+          assert len(refs) == 34, f'Expected 34 image references, found {len(refs)}'
+          assert all((target / r).is_file() for r in refs), 'Missing referenced image'
+          print('Validated all 34 illustrations and Markdown image references.')
+          PY
+          git add docs/erelia/images
+          git rm .github/workflows/import-erelia-gdd-images.yml
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Archive all 34 Erelia GDD illustrations'
+          git push origin HEAD:main
